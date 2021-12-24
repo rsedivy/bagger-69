@@ -1,0 +1,27 @@
+{
+  "name": "bagger-69",
+  "version": "1.0.0",
+  "description": "A minecraft bot for automated mining.",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsc ./index.ts && node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rsedivy/bagger-69.git"
+  },
+  "author": "rsedivy",
+  "license": "AGPL-3.0",
+  "bugs": {
+    "url": "https://github.com/rsedivy/bagger-69/issues"
+  },
+  "homepage": "https://github.com/rsedivy/bagger-69#readme",
+  "private": true,
+  "dependencies": {
+    "mineflayer": "^3.11.2",
+    "mineflayer-pathfinder": "^1.8.0",
+    "mineflayer-statemachine": "^1.6.4",
+    "prismarine-viewer": "^1.21.0"
+  }
+}
