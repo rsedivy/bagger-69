@@ -21,7 +21,7 @@ const credentials = require("./credentials.json") // Import credentials external
 
 const mcData = mcDataLoader("1.7.1");
 
-const START = new Vec3(0, 0, 0).floor();
+const START = new Vec3(25.5, 60, 62.5).floor();
 const SIZE = new Vec3(10, 30, 10);
 
 /// <reference path="./node_modules/mineflayer/index.d.ts">
@@ -162,6 +162,7 @@ bot.once("spawn", () => {
         })
     ]
 
+    console.log("Starting State machine");
 
     const rootLayer = new NestedStateMachine(transitions, enter);
     new BotStateMachine(bot, rootLayer);
@@ -183,7 +184,6 @@ function generateDigOrder() : Vec3[]{
 
         if(!(~~(i / SIZE.z) % 2)){
             const stairZ = ~~(i % SIZE.z)
-            console.log(stairZ);
 
             // digging towards the front
             order.push(new Vec3(frontStairX, -i, stairZ).plus(START))
@@ -208,7 +208,6 @@ function generateDigOrder() : Vec3[]{
             }
         }else{
             const stairZ = SIZE.z - (~~(i % SIZE.z)) - 1;
-            console.log(stairZ);
 
             order.push(new Vec3(backStairX, -i, stairZ).plus(START));
 
