@@ -1,16 +1,28 @@
 import {Vec3} from "vec3";
-import {BehaviorIdle, StateBehavior, StateMachineTargets} from "mineflayer-statemachine";
+import {pathfinder} from 'mineflayer-pathfinder';
+import {mineflayer as mineflayerViewer} from 'prismarine-viewer'
+import * as mcDataLoader from 'minecraft-data'
+import {
+    BehaviorFindInteractPosition,
+    BehaviorIdle, BehaviorMineBlock,
+    StateBehavior,
+    StateMachineTargets
+} from "mineflayer-statemachine";
 import * as mineflayer from "mineflayer";
-import {mineflayerViewer} from 'prismarine-viewer'
-const credentials = require("./credentials.json") // Import credentials externally. In the future, check args for credentials
 import {
     StateTransition,
     BotStateMachine,
     BehaviorMoveTo,
-    NestedStateMachine } from "mineflayer-statemachine";
-import {Movements, pathfinder} from 'mineflayer-pathfinder';
-import {Bot} from "mineflayer";
-const mineflayerViewer = require('prismarine-viewer').mineflayer;
+    NestedStateMachine
+} from "mineflayer-statemachine";
+
+
+const credentials = require("./credentials.json") // Import credentials externally. In the future, check args for credentials
+
+const mcData = mcDataLoader("1.7.1");
+
+const START = new Vec3(0, 0, 0).floor();
+const SIZE = new Vec3(10, 30, 10);
 
 /// <reference path="./node_modules/mineflayer/index.d.ts">
 
@@ -18,101 +30,232 @@ const mineflayerViewer = require('prismarine-viewer').mineflayer;
 let bot = mineflayer.createBot({
     username: credentials.username,
     password: credentials.password,
-    host: credentials.host
+    host: credentials.host,
+    hideErrors: false // for debug purposes
 });
 
 bot.loadPlugin(pathfinder);
 
 interface CustomTargets extends StateMachineTargets{
-    index: number
-    numSegments: number,
+    chestLocation: Vec3,
+    craftingTable: Vec3,
+    digOrder: Vec3[]
 }
 
-class SelectNextDestination implements StateBehavior {
+class SelectBlock implements StateBehavior {
     active: boolean = false;
-    stateName: string = 'SelectNextDestination';
+    stateName: string = 'SelectBlock';
+    bot: mineflayer.Bot;
+    targets: CustomTargets;
 
-    private readonly bot: Bot;
-    private targets: CustomTargets;
-
-    constructor(bot: Bot, targets: CustomTargets) {
+    constructor(bot: mineflayer.Bot, targets: CustomTargets)
+    {
         this.bot = bot;
         this.targets = targets;
     }
 
-    onStateEntered(): void {
-        if(this.targets.index === undefined || this.targets.positions === undefined){
-            console.log(`[${this.stateName}] Index or positions are not defined`);
-            return;
+    onStateEntered(): void
+    {
+        if(!(this.targets?.digOrder.length > 0)){
+            const position = this.targets.digOrder[0];
+
+            if(bot.blockAt(position).type === mcData.blocksByName["air"].id ||
+                bot.blockAt(position).type === mcData.blocksByName["torch"].id ){
+                this.targets.digOrder.shift();
+                console.log(`[${this.stateName}] Block at ${position} is air or torch`);
+
+                this.onStateEntered();
+            }else{
+                this.targets.position = position;
+                return;
+            }
         }
-
-        this.targets.index++;
-        if(this.targets.index >= this.targets.numSegments)
-            this.targets.index = 0;
-        this.targets.position = this.targets.positions[this.targets.index];
-
-        console.log(`[${this.stateName}] Moving to position ${this.targets.index}: ${this.targets.position}`);
     }
 }
+
+class MineSelect implements StateBehavior {
+    active: boolean = false;
+    stateName: string = 'MineSelect';
+    bot: mineflayer.Bot;
+    targets: CustomTargets;
+
+    constructor(bot: mineflayer.Bot, targets: CustomTargets)
+    {
+        this.bot = bot;
+        this.targets = targets;
+    }
+
+    onStateEntered(): void
+    {
+        if(!(this.targets?.digOrder.length > 0)){
+            this.targets.position = this.targets.digOrder.shift();
+            console.log(`[${this.stateName}] Mining at position ${this.targets.position}`);
+        }
+    }
+}
+
 
 bot.once("spawn", () => {
     console.log("Connected.");
 
-    // viewer takes up shit ton of resources
-    mineflayerViewer(bot, {port: 3000});
+    // viewer takes up a lot of resources, but is great for tracking progress
+    mineflayerViewer(bot, {port: 3000})
 
-    const mcData = require('minecraft-data')(bot.version)
-
-    const defaultMove = new Movements(bot, mcData)
-
-
-    // Empty target list... for now
-    const segments = 10, radius = 10;
-
+    // targets list
     const targets: CustomTargets = {
-        index: 0,
-        numSegments: segments,
-        positions: [],
+        chestLocation: new Vec3(0,0,0),
+        craftingTable: new Vec3(0,0,0),
+        digOrder: generateDigOrder()
     };
 
-    let position = bot.entity.position;
 
-    const angle = 2*Math.PI / segments;
+    const enter = new BehaviorIdle(); // entry state
+    const exit = new BehaviorIdle(); // exit state
 
-    for(let i = 0; i < segments; i++){
-        let currentAngle = angle * i;
-        const z_offset = Math.sin(currentAngle) * radius;
-        console.log(z_offset);
-        const x_offset = Math.cos(currentAngle) * radius;
-        console.log(x_offset);
-        const destination = new Vec3(position.x + x_offset, 320, position.z + z_offset);
-        targets.positions.push(destination);
-    }
-
-    const enter = new BehaviorIdle();
-
-    const moveState = new BehaviorMoveTo(bot, targets);
-    const destinationSelect = new SelectNextDestination(bot, targets);
+    const selectBlock = new SelectBlock(bot, targets);
+    const findInteractPos = new BehaviorFindInteractPosition(bot, targets);
+    const moveTo = new BehaviorMoveTo(bot, targets);
+    const mineSelect = new MineSelect(bot, targets);
+    const mineBlock = new BehaviorMineBlock(bot, targets);
 
     const transitions = [
         new StateTransition({
             parent: enter,
-            child: destinationSelect,
+            child: selectBlock,
             shouldTransition: () => true
         }),
         new StateTransition({
-            parent: destinationSelect,
-            child: moveState,
-            shouldTransition: () => true,
-            onTransition: () => {moveState.restart();}
+            parent: selectBlock,
+            child: findInteractPos,
+            shouldTransition: () => true
         }),
         new StateTransition({
-            parent: moveState,
-            child: destinationSelect,
-            shouldTransition: () => {return moveState.isFinished()}
+            parent: findInteractPos,
+            child: moveTo,
+            shouldTransition: () => true
+        }),
+        new StateTransition({
+            parent: moveTo,
+            child: mineSelect,
+            shouldTransition: () => {
+                return moveTo.isFinished();
+            }
+        }),
+        new StateTransition({
+            parent: mineSelect,
+            child: mineBlock,
+            shouldTransition: () => true
+        }),
+        new StateTransition({
+            parent: mineBlock,
+            child: selectBlock,
+            shouldTransition: () => {
+                return targets.digOrder.length > 0;
+            }
+        }),
+        new StateTransition({
+            parent: mineBlock,
+            child: exit,
+            shouldTransition: () => {
+                return mineBlock.isFinished;
+            }
         })
-    ];
+    ]
+
 
     const rootLayer = new NestedStateMachine(transitions, enter);
     new BotStateMachine(bot, rootLayer);
 });
+
+function generateDigOrder() : Vec3[]{
+
+    
+    const order: Array<Vec3> = [];
+
+    for (let i = 0; i < SIZE.y; i++) {
+
+        // Add stairs to the side. Every x blocks in depth,
+        // reverse the stairs.
+        // This staircase will be on the x+ side
+        const frontStairX = SIZE.x;
+        const backStairX = SIZE.x + 1;
+        // Lateral position of stairs
+
+        if(!(~~(i / SIZE.z) % 2)){
+            const stairZ = ~~(i % SIZE.z)
+            console.log(stairZ);
+
+            // digging towards the front
+            order.push(new Vec3(frontStairX, -i, stairZ).plus(START))
+
+            if(stairZ === 0){
+                order.push(new Vec3(frontStairX, -(i-1), stairZ +1).plus(START));
+            }
+
+            if(stairZ === SIZE.z - 1){
+                // if it's the last stair before switching directions
+                // dig three vertically to the side
+                order.push(new Vec3(backStairX, -i, stairZ).plus(START));
+                order.push(new Vec3(backStairX, -(i - 1), stairZ).plus(START));
+                order.push(new Vec3(backStairX, -(i - 2), stairZ).plus(START));
+            }else if(stairZ === SIZE.z - 2){
+                // On the second to last stair, just dig one block in front.
+                order.push(new Vec3(frontStairX, -i, stairZ + 1).plus(START))
+            }else{
+                // dig two blocks in front
+                order.push(new Vec3(frontStairX, -i, stairZ + 1).plus(START))
+                order.push(new Vec3(frontStairX, -i, stairZ + 2).plus(START))
+            }
+        }else{
+            const stairZ = SIZE.z - (~~(i % SIZE.z)) - 1;
+            console.log(stairZ);
+
+            order.push(new Vec3(backStairX, -i, stairZ).plus(START));
+
+            if(stairZ === 0){
+                order.push(new Vec3(frontStairX, -i, stairZ).plus(START));
+                order.push(new Vec3(frontStairX, -(i-1), stairZ).plus(START));
+            }else if(stairZ === 1){
+                order.push(new Vec3(backStairX, -i, stairZ-1).plus(START));
+                order.push(new Vec3(frontStairX, -i, stairZ).plus(START));
+                order.push(new Vec3(frontStairX, -i, stairZ-1).plus(START));
+            }else if(stairZ === SIZE.z -1){
+                order.push(new Vec3(backStairX, -(i -1), stairZ-1).plus(START));
+                order.push(new Vec3(backStairX, -(i -1), stairZ-2).plus(START));
+                order.push(new Vec3(backStairX, -i, stairZ-1).plus(START));
+                order.push(new Vec3(backStairX, -i, stairZ-2).plus(START));
+
+                order.push(new Vec3(frontStairX, -(i -1), stairZ-2).plus(START));
+                order.push(new Vec3(frontStairX, -i, stairZ-2).plus(START));
+            }else{
+                order.push(new Vec3(backStairX, -i, stairZ-1).plus(START));
+                order.push(new Vec3(backStairX, -i, stairZ-2).plus(START));
+
+                order.push(new Vec3(frontStairX, -i, stairZ).plus(START));
+                order.push(new Vec3(frontStairX, -i, stairZ-1).plus(START));
+                order.push(new Vec3(frontStairX, -i, stairZ-2).plus(START));
+            }
+
+        }
+
+        /*
+            Dig blocks in scanline order
+         */
+
+        for (let j = 0; j < SIZE.x; j++) {
+            if (j % 2) {
+                for (let k = 0; k < SIZE.z; k++) {
+                    order.push(new Vec3(j, -i, k).plus(START));
+                }
+            } else {
+                for (let k = SIZE.z - 1; k >= 0; k--) {
+                    order.push(new Vec3(j, -i, k).plus(START));
+                }
+            }
+        }
+
+
+    }
+
+    return order;
+}
