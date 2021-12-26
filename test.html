@@ -1,0 +1,250 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+
+<script type="module">
+    'use strict';
+
+    import * as THREE from 'https://cdn.skypack.dev/three@';
+    import { OrbitControls } from 'https://cdn.skypack.dev/three/examples/jsm/controls/OrbitControls.js';
+
+    var camera, scene, renderer;
+    var cube, cube_geometry, cube_material;
+    var controls;
+
+    let i = 0;
+    let order = [];
+    let regularBlocks = []
+
+    init();
+    render();
+
+
+    function init() {
+
+        scene = new THREE.Scene();
+
+        // renderer
+
+        renderer = new THREE.WebGLRenderer({
+            alpha: true
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // camera
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        // controls
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.addEventListener('change', render);
+        controls.enableZoom = true;
+
+        // mesh - cube
+        /*
+          cube_geometry = new THREE.CubeGeometry(5, 5, 5);
+
+          for (var i = 0; i < cube_geometry.faces.length; i += 2) {
+
+            var color = Math.random() * 0xffffff;
+
+            cube_geometry.faces[i].color.setHex(color);
+            cube_geometry.faces[i + 1].color.setHex(color);
+          }
+
+          cube_material = new THREE.MeshLambertMaterial({
+            color: 0xffffff,
+            vertexColors: THREE.FaceColors
+          });
+
+          cube = new THREE.Mesh(cube_geometry, cube_material);
+          scene.add(cube); */
+
+        /* const geometry = new THREE.CubeGeometry(1,1,1);
+                 const material = new THREE.MeshPhongMaterial({
+              color: 0xcc00cc
+                 });
+                 const cube = new THREE.Mesh(geometry, material);
+                 //console.log(i);
+                 scene.add(cube);
+         */
+        // Lights
+
+        var light = new THREE.DirectionalLight(0xffffff);
+        light.position.set(1, 1, 1);
+        scene.add(light);
+        var light = new THREE.DirectionalLight(0x002288);
+        light.position.set(-1, -1, -1);
+        scene.add(light);
+
+        var light = new THREE.AmbientLight(0x222222);
+        scene.add(light);
+
+        // events
+
+        window.addEventListener('resize', onWindowResize, false);
+
+
+        //scene.add( cube );
+
+
+        const START = new THREE.Vector3(0, 0, 0).floor();
+        const SIZE = new THREE.Vector3(10, 30, 10);
+
+
+        for (let i = 0; i < SIZE.y; i++) {
+
+            /*
+                Dig blocks in scanline order
+             */
+
+            for (let j = 0; j < SIZE.x; j++) {
+                if (j % 2) {
+                    for (let k = 0; k < SIZE.z; k++) {
+                        const index = order.push(new THREE.Vector3(j, -i, k).add(START));
+                        regularBlocks.push(index - 1);
+                    }
+                } else {
+                    for (let k = SIZE.z - 1; k >= 0; k--) {
+                        const index = order.push(new THREE.Vector3(j, -i, k).add(START));
+                        regularBlocks.push(index - 1);
+                    }
+                }
+            }
+                // Add stairs to the side. Every x blocks in depth,
+                // reverse the stairs.
+                // This staircase will be on the x+ side
+                const frontStairX = SIZE.x;
+                const backStairX = SIZE.x + 1;
+                // Lateral position of stairs
+
+                if(!(~~(i / SIZE.z) % 2)){
+                    const stairZ = ~~(i % SIZE.z)
+                    console.log(stairZ);
+
+                    // digging towards the front
+                    order.push(new THREE.Vector3(frontStairX, -i, stairZ).add(START))
+
+                    if(stairZ === 0){
+                        order.push(new THREE.Vector3(frontStairX, -(i-1), stairZ +1).add(START));
+                    }
+
+                    if(stairZ === SIZE.z - 1){
+                        // if it's the last stair before switching directions
+                        // dig three vertically to the side
+                        order.push(new THREE.Vector3(backStairX, -i, stairZ).add(START));
+                        order.push(new THREE.Vector3(backStairX, -(i - 1), stairZ).add(START));
+                        order.push(new THREE.Vector3(backStairX, -(i - 2), stairZ).add(START));
+                    }else if(stairZ === SIZE.z - 2){
+                        // On the second to last stair, just dig one block in front.
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ + 1).add(START))
+                    }else{
+                        // dig two blocks in front
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ + 1).add(START))
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ + 2).add(START))
+                    }
+                }else{
+                    const stairZ = SIZE.z - (~~(i % SIZE.z)) - 1;
+                    console.log(stairZ);
+
+                    order.push(new THREE.Vector3(backStairX, -i, stairZ).add(START));
+
+                    if(stairZ === 0){
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ).add(START));
+                        order.push(new THREE.Vector3(frontStairX, -(i-1), stairZ).add(START));
+                    }else if(stairZ === 1){
+                        order.push(new THREE.Vector3(backStairX, -i, stairZ-1).add(START));
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ).add(START));
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ-1).add(START));
+                    }else if(stairZ === SIZE.z -1){
+                        order.push(new THREE.Vector3(backStairX, -(i -1), stairZ-1).add(START));
+                        order.push(new THREE.Vector3(backStairX, -(i -1), stairZ-2).add(START));
+                        order.push(new THREE.Vector3(backStairX, -i, stairZ-1).add(START));
+                        order.push(new THREE.Vector3(backStairX, -i, stairZ-2).add(START));
+
+                        order.push(new THREE.Vector3(frontStairX, -(i -1), stairZ-2).add(START));
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ-2).add(START));
+                    }else{
+                        order.push(new THREE.Vector3(backStairX, -i, stairZ-1).add(START));
+                        order.push(new THREE.Vector3(backStairX, -i, stairZ-2).add(START));
+
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ).add(START));
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ-1).add(START));
+                        order.push(new THREE.Vector3(frontStairX, -i, stairZ-2).add(START));
+                    }
+
+                    // digging towards the back
+                }
+
+        }
+
+        order.forEach((e,i) => {
+            if(!regularBlocks.includes(i)){
+
+                let color = (regularBlocks.includes(i)) ? 0x00aa00 : 0xaa0000;
+                const geometry = new THREE.BoxGeometry(0.9,0.9,0.9);
+                const material = new THREE.MeshLambertMaterial({
+                    color: color
+                });
+                const cube = new THREE.Mesh(geometry, material);
+                cube.position.copy(e);
+                //console.log("");
+                scene.add(cube);
+            }
+        })
+
+        /*   order.forEach((e, i) => {
+            setTimeout(() => {
+              const cube = new THREE.Mesh( geometry, material );
+              cube.position.set(e);
+              scene.add(cube);
+              //console.log(`${e.x},${e.y},${e.z}`);
+              render();
+            }, 100 * i);
+          }) */
+
+    }
+
+    function render(time) {
+        time *= 0.001; // convert time to seconds
+
+/*        if (time >= i * 0.1) {
+            const geometry = new THREE.BoxGeometry(0.9,0.9,0.9);
+            const material = new THREE.MeshLambertMaterial({
+                color: 0xcc00cc
+            });
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.copy(order[i]);
+            //console.log("");
+            scene.add(cube);
+            i++;
+
+        }*/
+
+
+        renderer.render(scene, camera);
+        requestAnimationFrame(render);
+
+    }
+
+    function onWindowResize(event) {
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+    }
+
+</script>
+</body>
+</html>
