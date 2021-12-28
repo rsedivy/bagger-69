@@ -6,7 +6,8 @@ import {
     BehaviorFindInteractPosition,
     BehaviorIdle, BehaviorMineBlock,
     StateBehavior,
-    StateMachineTargets
+    StateMachineTargets,
+    globalSettings
 } from "mineflayer-statemachine";
 import * as mineflayer from "mineflayer";
 import {
@@ -19,9 +20,11 @@ import {
 
 const credentials = require("./credentials.json") // Import credentials externally. In the future, check args for credentials
 
-const mcData = mcDataLoader("1.7.1");
+// const mcData = mcDataLoader("1.7.1");
 
-const START = new Vec3(25.5, 60, 62.5).floor();
+globalSettings.debugMode = true; // Enable debug mode.
+
+const START = new Vec3(25.5, 61, -62.5).floor().offset(0.5,0,0.5);
 const SIZE = new Vec3(10, 30, 10);
 
 /// <reference path="./node_modules/mineflayer/index.d.ts">
@@ -39,14 +42,15 @@ bot.loadPlugin(pathfinder);
 interface CustomTargets extends StateMachineTargets{
     chestLocation: Vec3,
     craftingTable: Vec3,
-    digOrder: Vec3[]
+    digOrder: Vec3[],
+    torchPosition?: Vec3[]
 }
 
 class SelectBlock implements StateBehavior {
     active: boolean = false;
     stateName: string = 'SelectBlock';
-    bot: mineflayer.Bot;
-    targets: CustomTargets;
+    readonly bot: mineflayer.Bot;
+    readonly targets: CustomTargets;
 
     constructor(bot: mineflayer.Bot, targets: CustomTargets)
     {
@@ -56,11 +60,17 @@ class SelectBlock implements StateBehavior {
 
     onStateEntered(): void
     {
-        if(!(this.targets?.digOrder.length > 0)){
-            const position = this.targets.digOrder[0];
+        if((this.targets?.digOrder.length > 0)){
+            console.log(`[${this.stateName}] Entered`);
 
-            if(bot.blockAt(position).type === mcData.blocksByName["air"].id ||
-                bot.blockAt(position).type === mcData.blocksByName["torch"].id ){
+            const position = this.targets.digOrder[0];
+            /*console.log(`[${this.stateName}] Checking block ${bot.entity.position.offset(0,-1,0)}`);
+
+            let block = bot.blockAt(bot.entity.position.offset(0,-1,0));
+            console.log(JSON.stringify(block, null, '\t'));*/
+
+            if(bot.blockAt(position)?.type === 0 ||
+                bot.blockAt(position)?.type === 50 ){
                 this.targets.digOrder.shift();
                 console.log(`[${this.stateName}] Block at ${position} is air or torch`);
 
@@ -76,8 +86,8 @@ class SelectBlock implements StateBehavior {
 class MineSelect implements StateBehavior {
     active: boolean = false;
     stateName: string = 'MineSelect';
-    bot: mineflayer.Bot;
-    targets: CustomTargets;
+    readonly bot: mineflayer.Bot;
+    readonly targets: CustomTargets;
 
     constructor(bot: mineflayer.Bot, targets: CustomTargets)
     {
@@ -87,7 +97,8 @@ class MineSelect implements StateBehavior {
 
     onStateEntered(): void
     {
-        if(!(this.targets?.digOrder.length > 0)){
+        console.log(`[${this.stateName}] Entered`);
+        if((this.targets?.digOrder.length > 0)){
             this.targets.position = this.targets.digOrder.shift();
             console.log(`[${this.stateName}] Mining at position ${this.targets.position}`);
         }
@@ -99,13 +110,25 @@ bot.once("spawn", () => {
     console.log("Connected.");
 
     // viewer takes up a lot of resources, but is great for tracking progress
-    mineflayerViewer(bot, {port: 3000})
+    mineflayerViewer(bot, {port: 3000});
+
+    bot.waitForChunksToLoad()
+        .then(() => {
+            console.log("Chunks loaded");
+            runStateMachine()
+        });
+
+});
+
+function runStateMachine() : void {
+
+    const digOrder = generateDigOrder();
 
     // targets list
     const targets: CustomTargets = {
         chestLocation: new Vec3(0,0,0),
         craftingTable: new Vec3(0,0,0),
-        digOrder: generateDigOrder()
+        digOrder: digOrder
     };
 
 
@@ -127,31 +150,35 @@ bot.once("spawn", () => {
         new StateTransition({
             parent: selectBlock,
             child: findInteractPos,
-            shouldTransition: () => true
+            shouldTransition: () => true,
+
         }),
         new StateTransition({
             parent: findInteractPos,
             child: moveTo,
-            shouldTransition: () => true
+            shouldTransition: () => true,
+
         }),
         new StateTransition({
             parent: moveTo,
             child: mineSelect,
             shouldTransition: () => {
                 return moveTo.isFinished();
-            }
+            },
+
         }),
         new StateTransition({
             parent: mineSelect,
             child: mineBlock,
-            shouldTransition: () => true
+            shouldTransition: () => true,
+
         }),
         new StateTransition({
             parent: mineBlock,
             child: selectBlock,
             shouldTransition: () => {
-                return targets.digOrder.length > 0;
-            }
+                return mineBlock.isFinished && targets.digOrder.length > 0;
+            },
         }),
         new StateTransition({
             parent: mineBlock,
@@ -166,11 +193,11 @@ bot.once("spawn", () => {
 
     const rootLayer = new NestedStateMachine(transitions, enter);
     new BotStateMachine(bot, rootLayer);
-});
+}
 
 function generateDigOrder() : Vec3[]{
 
-    
+
     const order: Array<Vec3> = [];
 
     for (let i = 0; i < SIZE.y; i++) {
